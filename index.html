@@ -197,7 +197,8 @@
                 settings: "⚙️",
                 message: "💬",
                 sparkles: "✨",
-                close: "✕"
+                close: "✕",
+                trash: "🗑️"
             };
             return iconMap[type] || "○";
         }
@@ -360,6 +361,28 @@
                 task.completed = !task.completed;
                 saveData();
                 renderApp();
+            }
+        }
+
+        // Borrar tarea
+        function deleteTask(id) {
+            // Confirmación antes de borrar
+            if (confirm('¿Estás seguro de que querés borrar esta tarea?')) {
+                tasks = tasks.filter(task => task.id !== id);
+                saveData();
+                renderApp();
+                
+                // Notificación de Sam
+                setTimeout(() => {
+                    samNotification = "Tarea eliminada correctamente ✨";
+                    samMood = "servicial";
+                    showSamNotification();
+                    
+                    setTimeout(() => {
+                        samNotification = '';
+                        hideSamNotification();
+                    }, 3000);
+                }, 500);
             }
         }
 
@@ -848,13 +871,16 @@
                                             <span class="flex-1 ${task.completed ? 'line-through text-gray-500' : 'text-gray-800'}">
                                                 ${task.title}
                                             </span>
-                                            <span class="text-xs px-2 py-1 rounded ${
+                                            <span class="text-xs px-2 py-1 rounded mr-2 ${
                                                 task.priority === 'high' ? 'bg-red-100 text-red-600' :
                                                 task.priority === 'medium' ? 'bg-yellow-100 text-yellow-600' :
                                                 'bg-green-100 text-green-600'
                                             }">
                                                 ${task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
                                             </span>
+                                            <button onclick="deleteTask(${task.id})" class="text-red-500 hover:text-red-700 transition-colors ml-2">
+                                                <span class="icon">${getIcon('trash')}</span>
+                                            </button>
                                         </div>
                                     `).join('')
                                 }
@@ -881,13 +907,16 @@
                                                     ${task.date} ${task.time ? `a las ${task.time}` : ''}
                                                 </span>
                                             </div>
-                                            <span class="text-xs px-2 py-1 rounded ${
+                                            <span class="text-xs px-2 py-1 rounded mr-2 ${
                                                 task.priority === 'high' ? 'bg-red-100 text-red-600' :
                                                 task.priority === 'medium' ? 'bg-yellow-100 text-yellow-600' :
                                                 'bg-green-100 text-green-600'
                                             }">
                                                 ${task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
                                             </span>
+                                            <button onclick="deleteTask(${task.id})" class="text-red-500 hover:text-red-700 transition-colors ml-2">
+                                                <span class="icon">${getIcon('trash')}</span>
+                                            </button>
                                         </div>
                                     `).join('')
                                 }
