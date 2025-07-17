@@ -212,6 +212,9 @@
                 
                 const savedMessages = storage.getItem('sam-user-messages');
                 if (savedMessages) userMessages = JSON.parse(savedMessages);
+                
+                const savedReminders = storage.getItem('sam-reminders');
+                if (savedReminders) showTaskReminders = JSON.parse(savedReminders);
             } catch (e) {
                 console.warn('Error cargando datos:', e);
             }
@@ -222,6 +225,7 @@
             const storage = safeLocalStorage();
             storage.setItem('sam-tasks', JSON.stringify(tasks));
             storage.setItem('sam-user-messages', JSON.stringify(userMessages));
+            storage.setItem('sam-reminders', JSON.stringify(showTaskReminders));
         }
 
         // Sam check-in
@@ -437,6 +441,168 @@
             }
         }
 
+        // Sistema de recordatorios para tareas programadas
+        function checkTaskReminders() {
+            if (!showTaskReminders) return;
+            
+            const now = new Date();
+            const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+            
+            tasks.forEach(task => {
+                if (task.type === 'scheduled' && !task.completed && task.date === currentDate && task.time) {
+                    const taskDateTime = new Date(`${task.date}T${task.time}`);
+                    const timeDiff = taskDateTime.getTime() - now.getTime();
+                    
+                    // Recordatorio 30 minutos antes (tolerancia de 1 minuto)
+                    if (Math.abs(timeDiff - (30 * 60 * 1000)) < 60000) {
+                        showTaskReminder(task, '30 minutos');
+                    }
+                    
+                    // Recordatorio exacto (tolerancia de 1 minuto)
+                    if (Math.abs(timeDiff) < 60000) {
+                        showTaskReminder(task, 'ahora');
+                    }
+                    
+                    // Recordatorio 5 minutos después si no se completó
+                    if (Math.abs(timeDiff + (5 * 60 * 1000)) < 60000) {
+                        showTaskReminder(task, 'hace 5 minutos');
+                    }
+                }
+            });
+        }
+
+        // Mostrar recordatorio de tarea específica
+        function showTaskReminder(task, timing) {
+            const reminderMessages = {
+                '30 minutos': `🔔 En 30 minutos: ${task.title}`,
+                'ahora': `⏰ ¡Es hora! ${task.title}`,
+                'hace 5 minutos': `⚠️ Pendiente: ${task.title}`
+            };
+            
+            const reminderMessage = reminderMessages[timing] || `📋 Recordatorio: ${task.title}`;
+            
+            // Mostrar notificación de Sam
+            samNotification = reminderMessage;
+            samMood = "recordando tareas";
+            showTaskReminderNotification(task, timing);
+            
+            // Intentar notificación push del navegador
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('Sam - Recordatorio de Tarea', {
+                    body: reminderMessage,
+                    icon: 'data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="%238B5CF6"/><text x="32" y="40" text-anchor="middle" fill="white" font-size="24" font-family="Arial">S</text></svg>',
+                    vibrate: [200, 100, 200]
+                });
+            }
+            
+            // Auto-hide después de 15 segundos
+            setTimeout(() => {
+                samNotification = '';
+                hideTaskReminderNotification();
+            }, 15000);
+        }
+
+        // Mostrar notificación específica de recordatorio
+        function showTaskReminderNotification(task, timing) {
+            const existingNotification = document.getElementById('task-reminder-notification');
+            if (existingNotification) {
+                existingNotification.remove();
+            }
+            
+            if (!samNotification) return;
+            
+            const notification = document.createElement('div');
+            notification.id = 'task-reminder-notification';
+            
+            const priorityColors = {
+                'high': 'border-red-400 from-red-50 to-red-100',
+                'medium': 'border-yellow-400 from-yellow-50 to-yellow-100',
+                'low': 'border-green-400 from-green-50 to-green-100'
+            };
+            
+            const priorityColor = priorityColors[task.priority] || 'border-orange-400 from-orange-50 to-red-50';
+            notification.className = `fixed top-4 left-4 right-4 bg-gradient-to-r ${priorityColor} border-l-4 p-4 rounded-lg shadow-lg z-50 mx-auto max-w-md slide-up`;
+            notification.style.maxWidth = '400px';
+            notification.style.left = '50%';
+            notification.style.transform = 'translateX(-50%)';
+            
+            notification.innerHTML = `
+                <div class="flex items-start">
+                    <div class="bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center mr-3 text-sm font-bold">
+                        ⏰
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-gray-800 font-medium">${samNotification}</p>
+                        <p class="text-orange-600 text-xs mt-1">Prioridad: ${task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}</p>
+                        <div class="flex gap-2 mt-2">
+                            <button onclick="markTaskCompleted(${task.id})" class="bg-green-500 text-white px-3 py-1 rounded text-xs hover:bg-green-600">
+                                Completar
+                            </button>
+                            <button onclick="snoozeTaskReminder(${task.id})" class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">
+                                Posponer
+                            </button>
+                            <button onclick="hideTaskReminderNotification()" class="bg-gray-400 text-white px-3 py-1 rounded text-xs hover:bg-gray-500">
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(notification);
+        }
+
+        function hideTaskReminderNotification() {
+            const notification = document.getElementById('task-reminder-notification');
+            if (notification) {
+                notification.remove();
+            }
+        }
+
+        // Marcar tarea como completada desde recordatorio
+        function markTaskCompleted(taskId) {
+            toggleTask(taskId);
+            hideTaskReminderNotification();
+            samNotification = '';
+        }
+
+        // Posponer recordatorio (snooze)
+        function snoozeTaskReminder(taskId) {
+            hideTaskReminderNotification();
+            samNotification = '';
+            
+            // Mostrar mensaje de posposición
+            setTimeout(() => {
+                samNotification = "Vale, te recuerdo en 5 minutos 😉";
+                samMood = "comprensiva";
+                showSamNotification();
+                
+                setTimeout(() => {
+                    samNotification = '';
+                    hideSamNotification();
+                }, 3000);
+            }, 500);
+            
+            // Recordatorio en 5 minutos
+            setTimeout(() => {
+                const task = tasks.find(t => t.id === taskId);
+                if (task && !task.completed) {
+                    showTaskReminder(task, 'pospuesto');
+                }
+            }, 5 * 60 * 1000);
+        }
+
+        // Solicitar permisos de notificación al inicializar
+        function requestNotificationPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                        console.log('Permisos de notificación concedidos');
+                    }
+                });
+            }
+        }
+
         // Mini juego
         function startMiniGame() {
             showMiniGame = true;
@@ -555,6 +721,11 @@
                 }
             }, 25 * 60 * 1000); // 25 minutos
             
+            // Recordatorios de tareas programadas
+            intervals.taskReminders = setInterval(() => {
+                checkTaskReminders();
+            }, 60000); // Cada minuto
+            
             // Mensajes inspiracionales
             intervals.inspiration = setInterval(() => {
                 const allMessages = [...inspirationalMessages, ...userMessages];
@@ -670,6 +841,34 @@
                                 ${todayTasks.length === 0 ? 
                                     '<p class="text-gray-500 text-center py-4">No hay tareas para hoy</p>' :
                                     todayTasks.map(task => `
+                                        <div class="flex items-center p-3 bg-gray-50 rounded-lg mb-2">
+                                            <button onclick="toggleTask(${task.id})" class="mr-3 ${task.completed ? 'text-green-500' : 'text-gray-400'}">
+                                                <span class="icon">${getIcon('check')}</span>
+                                            </button>
+                                            <span class="flex-1 ${task.completed ? 'line-through text-gray-500' : 'text-gray-800'}">
+                                                ${task.title}
+                                            </span>
+                                            <span class="text-xs px-2 py-1 rounded ${
+                                                task.priority === 'high' ? 'bg-red-100 text-red-600' :
+                                                task.priority === 'medium' ? 'bg-yellow-100 text-yellow-600' :
+                                                'bg-green-100 text-green-600'
+                                            }">
+                                                ${task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
+                                            </span>
+                                        </div>
+                                    `).join('')
+                                }
+                            </div>
+
+                            <!-- Tareas programadas -->
+                            <div>
+                                <h3 class="text-lg font-medium text-gray-700 mb-3 flex items-center">
+                                    <span class="icon mr-2">${getIcon('clock')}</span>
+                                    Programadas
+                                </h3>
+                                ${scheduledTasks.length === 0 ? 
+                                    '<p class="text-gray-500 text-center py-4">No hay tareas programadas</p>' :
+                                    scheduledTasks.map(task => `
                                         <div class="flex items-center p-3 bg-gray-50 rounded-lg mb-2">
                                             <button onclick="toggleTask(${task.id})" class="mr-3 ${task.completed ? 'text-green-500' : 'text-gray-400'}">
                                                 <span class="icon">${getIcon('check')}</span>
@@ -830,6 +1029,7 @@
         // Inicializar aplicación
         function initApp() {
             loadData();
+            requestNotificationPermission();
             setupIntervals();
             renderApp();
             
@@ -837,6 +1037,10 @@
             setTimeout(() => {
                 samCheckIn();
             }, 10000);
+            
+            console.log('✅ Sam inicializada correctamente');
+            console.log(`📋 ${tasks.length} tareas cargadas`);
+            console.log(`🔔 Recordatorios: ${showTaskReminders ? 'Activados' : 'Desactivados'}`);
         }
 
         // Limpiar intervalos al cerrar
@@ -851,31 +1055,3 @@
     </script>
 </body>
 </html>
-                                            <button onclick="toggleTask(${task.id})" class="mr-3 ${task.completed ? 'text-green-500' : 'text-gray-400'}">
-                                                <span class="icon">${getIcon('check')}</span>
-                                            </button>
-                                            <span class="flex-1 ${task.completed ? 'line-through text-gray-500' : 'text-gray-800'}">
-                                                ${task.title}
-                                            </span>
-                                            <span class="text-xs px-2 py-1 rounded ${
-                                                task.priority === 'high' ? 'bg-red-100 text-red-600' :
-                                                task.priority === 'medium' ? 'bg-yellow-100 text-yellow-600' :
-                                                'bg-green-100 text-green-600'
-                                            }">
-                                                ${task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
-                                            </span>
-                                        </div>
-                                    `).join('')
-                                }
-                            </div>
-
-                            <!-- Tareas programadas -->
-                            <div>
-                                <h3 class="text-lg font-medium text-gray-700 mb-3 flex items-center">
-                                    <span class="icon mr-2">${getIcon('clock')}</span>
-                                    Programadas
-                                </h3>
-                                ${scheduledTasks.length === 0 ? 
-                                    '<p class="text-gray-500 text-center py-4">No hay tareas programadas</p>' :
-                                    scheduledTasks.map(task => `
-                                        <div class="flex items-center p-3 bg-gray-50 rounded-lg mb-2">
